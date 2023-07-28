@@ -68,6 +68,9 @@ class TrieNode {
 
   // You can add additional fields and methods here. But in general, you don't need to add extra fields to
   // complete this project.
+
+  // Find
+  auto FindNext(const char &c) const -> std::shared_ptr<const TrieNode>;
 };
 
 // A TrieNodeWithValue is a TrieNode that also has a value of type T associated with it.

@@ -1,8 +1,23 @@
 #include "primer/trie.h"
+#include <cstddef>
+#include <map>
+#include <memory>
 #include <string_view>
+#include <utility>
 #include "common/exception.h"
 
 namespace bustub {
+
+auto TrieNode::FindNext(const char &c) const -> std::shared_ptr<const TrieNode> {
+  if (!this->children_.empty()) {
+    auto it = this->children_.find(c);
+    if (it == this->children_.end()) {
+      return nullptr;
+    }
+    return it->second;
+  }
+  return nullptr;
+}
 
 template <class T>
 auto Trie::Get(std::string_view key) const -> const T * {
@@ -16,11 +31,39 @@ auto Trie::Get(std::string_view key) const -> const T * {
 
 template <class T>
 auto Trie::Put(std::string_view key, T value) const -> Trie {
-  // Note that `T` might be a non-copyable type. Always use `std::move` when creating `shared_ptr` on that value.
-  throw NotImplementedException("Trie::Put is not implemented.");
+  std::size_t l = key.size();
+  if (l < 1) {
+    return *this;
+  }
 
-  // You should walk through the trie and create new nodes if necessary. If the node corresponding to the key already
-  // exists, you should create a new `TrieNodeWithValue`.
+  auto cur = this->root_;
+
+  std::unique_ptr<TrieNode> new_nodes[l];
+
+  for (std::size_t i = 0; i < l - 1; i++) {
+    if (cur) {
+      new_nodes[i] = cur->Clone();
+      auto next = cur->FindNext(key[i]);
+      cur = next;
+    } else {
+      new_nodes[i] = std::make_unique<TrieNode>();
+    }
+  }
+
+  if (cur) {
+    if (cur->is_value_node_) {
+      
+    }
+    new_nodes[l-1] = cur->Clone()
+  }
+
+
+  for(std::size_t i = 0; i < l - 1; i++) {
+    char c = key[i];
+    new_nodes[i]->children_[c] = std::shared_ptr<const TrieNode>(std::move(new_nodes[i+1]));
+  }
+
+  return Trie(std::move(new_nodes[0]));
 }
 
 auto Trie::Remove(std::string_view key) const -> Trie {

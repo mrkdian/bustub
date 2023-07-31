@@ -93,12 +93,12 @@ auto Trie::Remove(std::string_view key) const -> Trie {
 
   if (!cur->children_.empty()) {
     new_nodes[l] = std::make_shared<TrieNode>(cur->children_); //copy
+  } else {
+    new_nodes[l] = std::make_shared<TrieNode>();
   }
 
   for(std::size_t i = 0; i < l; i++) {
-    if (new_nodes[i+1]) {
-      new_nodes[i]->children_[key[i]] = std::shared_ptr<const TrieNode>(new_nodes[i+1]);
-    }
+    new_nodes[i]->children_[key[i]] = std::shared_ptr<const TrieNode>(new_nodes[i+1]);
   }
 
   return Trie(std::move(new_nodes[0]));

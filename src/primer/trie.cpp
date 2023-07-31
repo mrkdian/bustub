@@ -51,16 +51,13 @@ auto Trie::Put(std::string_view key, T value) const -> Trie {
   }
 
   if (cur) {
-    if (cur->is_value_node_) {
-      
-    }
-    new_nodes[l-1] = cur->Clone()
+    new_nodes[l-1] = std::make_unique<TrieNodeWithValue<T>>(cur->children_, std::make_shared<T>(std::move(value)));
+  } else {
+    new_nodes[l-1] = std::make_unique<TrieNodeWithValue<T>>(std::make_shared<T>(std::move(value)));
   }
 
-
   for(std::size_t i = 0; i < l - 1; i++) {
-    char c = key[i];
-    new_nodes[i]->children_[c] = std::shared_ptr<const TrieNode>(std::move(new_nodes[i+1]));
+    new_nodes[i]->children_[key[i]] = std::shared_ptr<const TrieNode>(std::move(new_nodes[i+1]));
   }
 
   return Trie(std::move(new_nodes[0]));

@@ -21,53 +21,87 @@ auto TrieNode::FindNext(const char &c) const -> std::shared_ptr<const TrieNode> 
 
 template <class T>
 auto Trie::Get(std::string_view key) const -> const T * {
-  throw NotImplementedException("Trie::Get is not implemented.");
+  auto l = key.size();
+  auto cur = this->root_;
+  for (std::size_t i = 0; i < l; i++) {
+    if (cur) {
+      cur = cur->FindNext(key[i]);
+    } else {
+      return nullptr;
+    }
+  }
 
-  // You should walk through the trie to find the node corresponding to the key. If the node doesn't exist, return
-  // nullptr. After you find the node, you should use `dynamic_cast` to cast it to `const TrieNodeWithValue<T> *`. If
-  // dynamic_cast returns `nullptr`, it means the type of the value is mismatched, and you should return nullptr.
-  // Otherwise, return the value.
+  if (!cur || !cur->is_value_node_) {
+    return nullptr;
+  }
+  auto node = dynamic_cast<const TrieNodeWithValue<T> *>(cur.get());
+  if (!node) {
+    return nullptr;
+  }
+  return node->value_.get();
 }
 
 template <class T>
 auto Trie::Put(std::string_view key, T value) const -> Trie {
-  std::size_t l = key.size();
-  if (l < 1) {
-    return *this;
-  }
+  auto l = key.size();
 
   auto cur = this->root_;
 
-  std::unique_ptr<TrieNode> new_nodes[l];
+  std::shared_ptr<TrieNode> new_nodes[l+1];
 
-  for (std::size_t i = 0; i < l - 1; i++) {
+  for (std::size_t i = 0; i < l; i++) {
     if (cur) {
       new_nodes[i] = cur->Clone();
-      auto next = cur->FindNext(key[i]);
-      cur = next;
+      cur = cur->FindNext(key[i]);
     } else {
-      new_nodes[i] = std::make_unique<TrieNode>();
+      new_nodes[i] = std::make_shared<TrieNode>();
     }
   }
 
   if (cur) {
-    new_nodes[l-1] = std::make_unique<TrieNodeWithValue<T>>(cur->children_, std::make_shared<T>(std::move(value)));
+    new_nodes[l] = std::make_unique<TrieNodeWithValue<T>>(cur->children_, std::make_shared<T>(std::move(value)));
   } else {
-    new_nodes[l-1] = std::make_unique<TrieNodeWithValue<T>>(std::make_shared<T>(std::move(value)));
+    new_nodes[l] = std::make_unique<TrieNodeWithValue<T>>(std::make_shared<T>(std::move(value)));
   }
 
-  for(std::size_t i = 0; i < l - 1; i++) {
-    new_nodes[i]->children_[key[i]] = std::shared_ptr<const TrieNode>(std::move(new_nodes[i+1]));
+  for(std::size_t i = 0; i < l; i++) {
+    new_nodes[i]->children_[key[i]] = std::shared_ptr<const TrieNode>(new_nodes[i+1]);
   }
 
   return Trie(std::move(new_nodes[0]));
 }
 
 auto Trie::Remove(std::string_view key) const -> Trie {
-  throw NotImplementedException("Trie::Remove is not implemented.");
+  auto l = key.size();
 
-  // You should walk through the trie and remove nodes if necessary. If the node doesn't contain a value any more,
-  // you should convert it to `TrieNode`. If a node doesn't have children any more, you should remove it.
+  auto cur = this->root_;
+
+  std::shared_ptr<TrieNode> new_nodes[l+1];
+
+  for (std::size_t i = 0; i < l; i++) {
+    if (cur) {
+      new_nodes[i] = cur->Clone();
+      cur = cur->FindNext(key[i]);
+    } else {
+      return *this;
+    }
+  }
+
+  if (!cur || !cur->is_value_node_) {
+    return *this;
+  }
+
+  if (!cur->children_.empty()) {
+    new_nodes[l] = std::make_shared<TrieNode>(cur->children_); //copy
+  }
+
+  for(std::size_t i = 0; i < l; i++) {
+    if (new_nodes[i+1]) {
+      new_nodes[i]->children_[key[i]] = std::shared_ptr<const TrieNode>(new_nodes[i+1]);
+    }
+  }
+
+  return Trie(std::move(new_nodes[0]));
 }
 
 // Below are explicit instantiation of template functions.

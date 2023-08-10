@@ -145,7 +145,6 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
 
     this->page_table_[page_id] = frame_id;
 
-    this->pages_[frame_id].pin_count_++;
     this->replacer_->SetEvictable(frame_id, false);
     this->replacer_->RecordAccess(frame_id);
 

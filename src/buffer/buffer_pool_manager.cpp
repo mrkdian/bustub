@@ -138,7 +138,11 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
     }
     this->page_table_.erase(this->pages_[frame_id].page_id_);
     
+    this->pages_[frame_id].page_id_ = page_id;
+    this->pages_[frame_id].pin_count_ = 1;
+    this->pages_[frame_id].is_dirty_ = false;
     this->disk_manager_->ReadPage(page_id, this->pages_[frame_id].data_);
+
     this->page_table_[page_id] = frame_id;
 
     this->pages_[frame_id].pin_count_++;

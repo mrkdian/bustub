@@ -9,9 +9,12 @@
 // Copyright (c) 2015-2021, Carnegie Mellon University Database Group
 //
 //===----------------------------------------------------------------------===//
+#include <mutex>
 
 #include "buffer/buffer_pool_manager.h"
 
+#include "common/logger.h"
+#include "common/config.h"
 #include "common/exception.h"
 #include "common/macros.h"
 #include "storage/page/page_guard.h"
@@ -38,9 +41,113 @@ BufferPoolManager::BufferPoolManager(size_t pool_size, DiskManager *disk_manager
 
 BufferPoolManager::~BufferPoolManager() { delete[] pages_; }
 
-auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * { return nullptr; }
+auto BufferPoolManager::NewPage(page_id_t *page_id) -> Page * {
+  std::scoped_lock lk(this->latch_);
+
+  if(!this->free_list_.empty()) {
+    auto frame_id = this->free_list_.front();
+    this->free_list_.pop_front();
+
+    auto new_page_id = AllocatePage();
+
+    this->pages_[frame_id].page_id_ = new_page_id;
+    this->pages_[frame_id].pin_count_ = 1;
+    this->pages_[frame_id].is_dirty_ = false;
+    this->pages_[frame_id].ResetMemory();
+
+    this->page_table_[new_page_id] = frame_id;
+    
+    this->replacer_->RecordAccess(frame_id);
+    this->replacer_->SetEvictable(frame_id, false);
+
+    return this->pages_ + frame_id;
+  }
+
+  if(this->replacer_->Size() > 0) {
+    frame_id_t frame_id;
+    auto is_evict = this->replacer_->Evict(&frame_id);
+    if(!is_evict) {
+      LOG_DEBUG("BufferPoolManager NewPage evict false");
+      return nullptr;
+    }
+    if(this->pages_[frame_id].pin_count_ > 0) {
+      LOG_DEBUG("BufferPoolManager NewPage evict page, but the pin count > 0");
+    }
+    
+    if(this->pages_[frame_id].is_dirty_) {
+      this->disk_manager_->WritePage(this->pages_[frame_id].page_id_, this->pages_[frame_id].data_);
+    }
+    this->page_table_.erase(this->pages_[frame_id].page_id_);
+    
+    auto new_page_id = AllocatePage();
+
+    this->pages_[frame_id].page_id_ = new_page_id;
+    this->pages_[frame_id].pin_count_ = 1;
+    this->pages_[frame_id].is_dirty_ = false;
+    this->pages_[frame_id].ResetMemory();
+
+    this->page_table_[new_page_id] = frame_id;
+
+    this->replacer_->RecordAccess(frame_id);
+    this->replacer_->SetEvictable(frame_id, false);
+
+    return this->pages_ + frame_id;
+  }
+
+  return nullptr;
+}
 
 auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType access_type) -> Page * {
+  std::scoped_lock lk(this->latch_);
+
+  auto it = this->page_table_.find(page_id);
+  if(it != this->page_table_.end()) {
+    return this->pages_ + it->second;
+  }
+
+  if(!this->free_list_.empty()) {
+    auto frame_id = this->free_list_.front();
+    this->free_list_.pop_front();
+
+    this->pages_[frame_id].page_id_ = page_id;
+    this->pages_[frame_id].pin_count_ = 1;
+    this->pages_[frame_id].is_dirty_ = false;
+    this->disk_manager_->ReadPage(page_id, this->pages_[frame_id].data_);
+
+    this->page_table_[page_id] = frame_id;
+
+    this->replacer_->SetEvictable(frame_id, false);
+    this->replacer_->RecordAccess(frame_id);
+
+    return this->pages_ + frame_id;
+  }
+
+  if(this->replacer_->Size() > 0) {
+    frame_id_t frame_id;
+    auto is_evict = this->replacer_->Evict(&frame_id);
+    if(!is_evict) {
+      LOG_DEBUG("BufferPoolManager FetchPage evict false");
+      return nullptr;
+    }
+    if(this->pages_[frame_id].pin_count_ > 0) {
+      LOG_DEBUG("BufferPoolManager FetchPage evict page, but the pin count > 0");
+    }
+    
+    if(this->pages_[frame_id].is_dirty_) {
+      this->disk_manager_->WritePage(this->pages_[frame_id].page_id_, this->pages_[frame_id].data_);
+    }
+    this->page_table_.erase(this->pages_[frame_id].page_id_);
+    
+    this->disk_manager_->ReadPage(page_id, this->pages_[frame_id].data_);
+    this->page_table_[page_id] = frame_id;
+
+    this->pages_[frame_id].pin_count_++;
+    this->replacer_->SetEvictable(frame_id, false);
+    this->replacer_->RecordAccess(frame_id);
+
+    return this->pages_ + frame_id;
+  }
+
   return nullptr;
 }
 

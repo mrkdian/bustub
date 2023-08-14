@@ -25,9 +25,9 @@ BufferPoolManager::BufferPoolManager(size_t pool_size, DiskManager *disk_manager
                                      LogManager *log_manager)
     : pool_size_(pool_size), disk_manager_(disk_manager), log_manager_(log_manager) {
   // TODO(students): remove this line after you have implemented the buffer pool manager
-  throw NotImplementedException(
-      "BufferPoolManager is not implemented yet. If you have finished implementing BPM, please remove the throw "
-      "exception line in `buffer_pool_manager.cpp`.");
+  // throw NotImplementedException(
+  //     "BufferPoolManager is not implemented yet. If you have finished implementing BPM, please remove the throw "
+  //     "exception line in `buffer_pool_manager.cpp`.");
 
   // we allocate a consecutive memory space for the buffer pool
   pages_ = new Page[pool_size_];
@@ -102,6 +102,7 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
 
   auto it = this->page_table_.find(page_id);
   if(it != this->page_table_.end()) {
+    this->pages_[it->second].pin_count_++;
     return this->pages_ + it->second;
   }
 
@@ -155,14 +156,92 @@ auto BufferPoolManager::FetchPage(page_id_t page_id, [[maybe_unused]] AccessType
 }
 
 auto BufferPoolManager::UnpinPage(page_id_t page_id, bool is_dirty, [[maybe_unused]] AccessType access_type) -> bool {
+  std::scoped_lock lk(this->latch_);
+
+  auto it = this->page_table_.find(page_id);
+  if(it == this->page_table_.end()) {
+    return false;
+  }
+
+  auto frame_id = it->second;
+
+  if(this->pages_[frame_id].pin_count_ > 1) {
+    this->pages_[frame_id].pin_count_--;
+  }
+
+  if(this->pages_[frame_id].pin_count_ == 0) {
+    this->replacer_->SetEvictable(frame_id, true);
+  }
+
+  if(!this->pages_[frame_id].is_dirty_ && is_dirty) {
+    this->pages_[frame_id].is_dirty_ = is_dirty;
+  }
+
   return false;
 }
 
-auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool { return false; }
+auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
+  std::scoped_lock lk(this->latch_);
 
-void BufferPoolManager::FlushAllPages() {}
+  auto it = this->page_table_.find(page_id);
+  if(it == this->page_table_.end()) {
+    return false;
+  }
 
-auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool { return false; }
+  auto frame_id = it->second;
+
+  if(this->pages_[frame_id].page_id_ == INVALID_PAGE_ID) {
+    LOG_DEBUG("BufferPoolManager FlushPage invalid page id");
+    return false;
+  }
+
+  this->disk_manager_->WritePage(this->pages_[frame_id].page_id_, this->pages_[frame_id].data_);
+  this->pages_[frame_id].is_dirty_ = false;
+
+  return true;
+}
+
+void BufferPoolManager::FlushAllPages() {
+  std::scoped_lock lk(this->latch_);
+
+  for(auto & it : this->page_table_) {
+    auto frame_id = it.second;
+    if(this->pages_[frame_id].page_id_ == INVALID_PAGE_ID) {
+      LOG_DEBUG("BufferPoolManager FlushAllPage invalid page id");
+      continue;
+    }
+    this->disk_manager_->WritePage(this->pages_[frame_id].page_id_, this->pages_[frame_id].data_);
+    this->pages_[frame_id].is_dirty_ = false;
+  }
+}
+
+auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
+  std::scoped_lock lk(this->latch_);
+
+  auto it = this->page_table_.find(page_id);
+  if(it == this->page_table_.end()) {
+    return true;
+  }
+
+  auto frame_id = it->second;
+
+  if(this->pages_[frame_id].page_id_ == INVALID_PAGE_ID) {
+    throw Exception("BufferPoolManager DeletePage invalid page id");
+  }
+
+  if(this->pages_[frame_id].pin_count_ > 0) {
+    return false;
+  }
+
+  this->DeallocatePage(this->pages_[frame_id].page_id_);
+
+  this->pages_[frame_id].page_id_ = INVALID_PAGE_ID;
+  this->pages_[frame_id].pin_count_ = 0;
+  this->pages_[frame_id].is_dirty_ = false;
+  this->pages_[frame_id].ResetMemory();
+  
+  return true;
+}
 
 auto BufferPoolManager::AllocatePage() -> page_id_t { return next_page_id_++; }
 
